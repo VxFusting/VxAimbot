@@ -1,16 +1,10 @@
--- Aimbot Script using Orion Library
--- This is the full self-contained script; loads Orion internally.
--- Hold right mouse button to lock camera to nearest enemy's head (or selected part).
--- Release to revert camera.
--- GUI with tabs for Aimbot, Visuals, Misc.
-
 local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/jensonhirst/Orion/main/source')))()
 
 local Window = OrionLib:MakeWindow({
-    Name = "Grok Aimbot Script",
+    Name = "VxHub",
     HidePremium = false,
     SaveConfig = true,
-    ConfigFolder = "GrokAimbotConfig"
+    ConfigFolder = "VxConfig"
 })
 
 local AimbotTab = Window:MakeTab({
