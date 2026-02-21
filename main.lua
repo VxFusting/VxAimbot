@@ -1,306 +1,307 @@
--- VxHub Aimbot + Fly + Noclip (UPDATED: ALWAYS Ignores Teammates + Arsenal Camera FIX!)
--- Changes:
--- ✅ IGNORES TEAMMATES ALWAYS (TeamCheck = true hardcoded + nil-safe, no toggle mistakes)
--- ✅ Camera FORCES Scriptable EVERY FRAME (beats Arsenal ADS override)
--- ✅ Bigger FOV/Sens defaults for Arsenal
--- ✅ No Target? Notifies "No enemies in FOV!"
--- ✅ Rayfield: 100% buttons/toggles work
--- Hold RMB → INSTANT head lock on nearest ENEMY. Release → Normal ADS.
+-- Simple Mouse Aimlock + Box ESP (concept / educational use only)
+-- Hold Right Mouse Button → lock onto closest visible enemy head
+-- Works in games like Arsenal / similar FPS (but detection risk is high in 2025–2026)
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "VxHub - Ignores Teammates",
-   LoadingTitle = "VxHub Interface",
-   LoadingSubtitle = "Arsenal Ready!",
-   ConfigurationSaving = {
-      Enabled = true,
-      FolderName = "VxConfig",
-      FileName = "VxHub"
-   },
-   KeySystem = false
+    Name = "Basic Aimlock + ESP",
+    LoadingTitle = "Mouse Aimlock",
+    LoadingSubtitle = "Hold RMB to lock",
+    ConfigurationSaving = { Enabled = false }
 })
 
-local AimbotTab = Window:CreateTab("Aimbot", 4483345998)
-local VisualsTab = Window:CreateTab("Visuals", 4483345998)
-local MiscTab = Window:CreateTab("Misc", 4483345998)
+local Tab = Window:CreateTab("Main", 4483362458)
 
-AimbotTab:CreateSection("Aimbot (Ignores Teammates ALWAYS)")
+-- Settings
+local Enabled        = false
+local TeamCheck      = true
+local WallCheck      = true
+local AimPart        = "Head"
+local Smoothness     = 0.14     -- 0.05 = very snappy, 0.30 = very smooth
+local FOV            = 180
+local Prediction     = 0.13     -- basic movement prediction
 
--- Variables (teamCheck = TRUE FOREVER)
-local enabled = false
-local aimPart = "Head"
-local fov = 400  -- Arsenal default
-local sens = 1.0  -- Instant snap
-local teamCheck = true  -- HARDCODED: Ignores teammates!
-local visibleCheck = false
-local prediction = false  -- Off for simplicity
+local ESP_Enabled    = false
+local ESP_Color      = Color3.fromRGB(0, 255, 100)
+local ESP_Thickness  = 1.5
 
-AimbotTab:CreateToggle({
-   Name = "Enabled",
-   CurrentValue = false,
-   Flag = "AimbotEnabled",
-   Callback = function(Value)
-      enabled = Value
-      Rayfield:Notify({Title = "Aimbot", Content = Value and "ON! Hold RMB for enemy heads" or "OFF", Duration = 4, Image = 4483362458})
-   end,
-})
+-- Services
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInput      = game:GetService("UserInputService")
+local Drawing        = game:GetService("Drawing")
 
-AimbotTab:CreateLabel("Teammates: ALWAYS Ignored")
+local LocalPlayer    = Players.LocalPlayer
+local Mouse          = LocalPlayer:GetMouse()
+local Camera         = workspace.CurrentCamera
 
-AimbotTab:CreateDropdown({
-   Name = "Aim Part",
-   Options = {"Head", "HumanoidRootPart", "UpperTorso"},
-   CurrentOption = "Head",
-   Flag = "AimPart",
-   Callback = function(Option)
-      aimPart = Option
-   end,
-})
+local Aiming         = false
 
-AimbotTab:CreateSlider({
-   Name = "Sensitivity (1.0 = Snap)",
-   Min = 0.1,
-   Max = 1,
-   Default = 1.0,
-   Color = Color3.fromRGB(120,120,255),
-   Increment = 0.05,
-   Flag = "Sensitivity",
-   Callback = function(Value)
-      sens = Value
-   end,
-})
-
-AimbotTab:CreateSlider({
-   Name = "FOV",
-   Min = 50,
-   Max = 800,
-   Default = 400,
-   Color = Color3.fromRGB(120,120,255),
-   Increment = 10,
-   Flag = "FOV",
-   Callback = function(Value)
-      fov = Value
-   end,
-})
-
-AimbotTab:CreateSection("Advanced (Optional)")
-
-AimbotTab:CreateToggle({
-   Name = "Visible Check (No Walls)",
-   CurrentValue = false,
-   Flag = "VisibleCheck",
-   Callback = function(Value)
-      visibleCheck = Value
-   end,
-})
-
-AimbotTab:CreateToggle({
-   Name = "Prediction",
-   CurrentValue = false,
-   Flag = "Prediction",
-   Callback = function(Value)
-      prediction = Value
-   end,
-})
-
--- Visuals
-VisualsTab:CreateSection("FOV Circle")
-
-local showFOV = false
-local Drawing = game:GetService("Drawing")
+-- FOV Circle
 local fovCircle = Drawing.new("Circle")
-fovCircle.Radius = fov
-fovCircle.Color = Color3.fromRGB(255, 0, 0)
-fovCircle.Thickness = 3
-fovCircle.NumSides = 100
-fovCircle.Filled = false
-fovCircle.Transparency = 1
-fovCircle.Visible = false
+fovCircle.Thickness   = 2
+fovCircle.NumSides    = 60
+fovCircle.Radius      = FOV
+fovCircle.Color       = Color3.fromRGB(220, 40, 40)
+fovCircle.Filled      = false
+fovCircle.Transparency = 0.85
+fovCircle.Visible     = true
+fovCircle.Position    = Vector2.new()
 
-VisualsTab:CreateToggle({
-   Name = "Show FOV Circle",
-   CurrentValue = true,
-   Flag = "ShowFOV",
-   Callback = function(Value)
-      showFOV = Value
-      fovCircle.Visible = Value
-   end,
-})
+-- ESP Table
+local ESP_Objects = {}
 
--- Misc: Fly + Noclip
-MiscTab:CreateSection("Movement")
+-- ────────────────────────────────────────
+--   Core: Find closest visible enemy
+-- ────────────────────────────────────────
 
-local flyEnabled = false
-local flySpeed = 50
-local flyConnection, bv, humanoid
-
-MiscTab:CreateToggle({
-   Name = "Fly (WASD / Space=Up / Shift=Down)",
-   CurrentValue = false,
-   Flag = "Fly",
-   Callback = function(Value)
-      flyEnabled = Value
-      local char = game.Players.LocalPlayer.Character
-      if not char or not char:FindFirstChild("HumanoidRootPart") then 
-         Rayfield:Notify({Title = "Fly", Content = "Respawn & retry!", Duration = 3}); return 
-      end
-      humanoid = char:FindFirstChild("Humanoid")
-      if Value then
-         bv = Instance.new("BodyVelocity")
-         bv.MaxForce = Vector3.new(4000, 4000, 4000)
-         bv.Velocity = Vector3.new(0,0,0)
-         bv.Parent = char.HumanoidRootPart
-         flyConnection = game:GetService("RunService").RenderStepped:Connect(function()
-            if not flyEnabled or not bv or not bv.Parent or not humanoid.Parent then return end
-            local cam = workspace.CurrentCamera
-            local uis = game:GetService("UserInputService")
-            local move = humanoid.MoveDirection * flySpeed
-            local vel = cam.CFrame:VectorToWorldSpace(move)
-            bv.Velocity = Vector3.new(vel.X, 0, vel.Z)
-            if uis:IsKeyDown(Enum.KeyCode.Space) then bv.Velocity = bv.Velocity + Vector3.new(0, flySpeed, 0) end
-            if uis:IsKeyDown(Enum.KeyCode.LeftShift) then bv.Velocity = bv.Velocity - Vector3.new(0, flySpeed, 0) end
-         end)
-      else
-         if bv then bv:Destroy(); bv = nil end
-         if flyConnection then flyConnection:Disconnect(); flyConnection = nil end
-      end
-   end,
-})
-
-MiscTab:CreateSlider({
-   Name = "Fly Speed",
-   Min = 10,
-   Max = 200,
-   Default = 50,
-   Color = Color3.fromRGB(0, 255, 0),
-   Increment = 5,
-   Flag = "FlySpeed",
-   Callback = function(Value)
-      flySpeed = Value
-   end,
-})
-
-local noclipEnabled = false
-local noclipConnection
-
-MiscTab:CreateToggle({
-   Name = "Noclip (Phase Walls)",
-   CurrentValue = false,
-   Flag = "Noclip",
-   Callback = function(Value)
-      noclipEnabled = Value
-      if Value then
-         noclipConnection = game:GetService("RunService").Stepped:Connect(function()
-            local char = game.Players.LocalPlayer.Character
-            if char then
-               for _, part in pairs(char:GetDescendants()) do
-                  if part:IsA("BasePart") and part ~= char.HumanoidRootPart then
-                     part.CanCollide = false
-                  end
-               end
-            end
-         end)
-      else
-         if noclipConnection then noclipConnection:Disconnect(); noclipConnection = nil end
-      end
-   end,
-})
-
-MiscTab:CreateButton({
-   Name = "Destroy GUI",
-   Callback = function()
-      Rayfield:Destroy()
-   end,
-})
-
--- CORE AIMBOT (Nil-Safe Teams + Enemy Only)
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local camera = workspace.CurrentCamera
-local localPlayer = Players.LocalPlayer
-local holding = false
-local noTargetNotifyTime = 0
-
-local function isVisible(part)
-   if not visibleCheck then return true end
-   local char = localPlayer.Character
-   if not char or not char:FindFirstChild("Head") then return false end
-   local eyePos = char.Head.Position
-   local direction = (part.Position - eyePos).Unit * 1000
-   local rayParams = RaycastParams.new()
-   rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-   rayParams.FilterDescendantsInstances = {char}
-   local result = workspace:Raycast(eyePos, direction, rayParams)
-   return not result or result.Instance:IsDescendantOf(part.Parent)
+local function isValidTarget(player)
+    if player == LocalPlayer then return false end
+    if not player.Character then return false end
+    
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+    
+    if TeamCheck then
+        -- Arsenal-style team check (most common in 2025-2026 games)
+        if player.Team == LocalPlayer.Team or player.TeamColor == LocalPlayer.TeamColor then
+            return false
+        end
+    end
+    
+    return true
 end
 
-local function getClosest()
-   local closest, minDist = nil, math.huge
-   local center = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
-   for _, player in ipairs(Players:GetPlayers()) do
-      if player == localPlayer or not player.Character or not player.Character:FindFirstChild(aimPart) then continue end
-      local hum = player.Character:FindFirstChild("Humanoid")
-      if not hum or hum.Health <= 0 then continue end
-      -- NIL-SAFE TEAM IGNORE (ALWAYS skips teammates)
-      if teamCheck and player.Team and localPlayer.Team and player.Team == localPlayer.Team then continue end
-      local part = player.Character[aimPart]
-      if not isVisible(part) then continue end
-      local pos, onScreen = camera:WorldToViewportPoint(part.Position)
-      if onScreen then
-         local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-         if dist < minDist and dist <= fov then
-            minDist = dist
+local function isVisible(targetPart)
+    if not WallCheck then return true end
+    
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin).Unit * 5000
+    
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character or game, Camera}
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.IgnoreWater = true
+    
+    local result = workspace:Raycast(origin, direction, rayParams)
+    
+    if result and result.Instance then
+        -- If we hit the target directly → visible
+        if result.Instance:IsDescendantOf(targetPart.Parent) then
+            return true
+        end
+        return false -- something else blocked
+    end
+    
+    return true -- no wall hit
+end
+
+local function getClosestEnemy()
+    local closest = nil
+    local closestDist = FOV + 1
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y + game:GetService("GuiService"):GetGuiInset().Y)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if not isValidTarget(player) then continue end
+        
+        local part = player.Character:FindFirstChild(AimPart)
+        if not part then continue end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen then continue end
+        
+        local screen2d = Vector2.new(screenPos.X, screenPos.Y)
+        local distance = (screen2d - mousePos).Magnitude
+        
+        if distance < closestDist and isVisible(part) then
             closest = part
-         end
-      end
-   end
-   return closest
+            closestDist = distance
+        end
+    end
+    
+    return closest
 end
 
-UserInputService.InputBegan:Connect(function(input, gp)
-   if gp or input.UserInputType ~= Enum.UserInputType.MouseButton2 or not enabled then return end
-   holding = true
+-- ────────────────────────────────────────
+--   Mouse movement logic
+-- ────────────────────────────────────────
+
+UserInput.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        Aiming = true
+    end
 end)
 
-UserInputService.InputEnded:Connect(function(input)
-   if input.UserInputType == Enum.UserInputType.MouseButton2 then
-      holding = false
-      camera.CameraType = Enum.CameraType.Custom
-   end
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        Aiming = false
+    end
 end)
 
-local lastNotify = 0
-RunService.RenderStepped:Connect(function()
-   local center = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
-   fovCircle.Position = center
-   fovCircle.Radius = fov
-   fovCircle.Visible = showFOV
-   
-   if holding and enabled then
-      -- FORCE Scriptable EVERY FRAME (Arsenal-proof)
-      camera.CameraType = Enum.CameraType.Scriptable
-      local target = getClosest()
-      if target then
-         local predPos = target.Position
-         if prediction and target.AssemblyLinearVelocity.Magnitude > 0 then
-            predPos = predPos + (target.AssemblyLinearVelocity * 0.13)
-         end
-         local char = localPlayer.Character
-         local eyePos = (char and char:FindFirstChild("Head") and char.Head.Position) or camera.CFrame.Position
-         local newCFrame = CFrame.lookAt(eyePos, predPos)
-         camera.CFrame = camera.CFrame:Lerp(newCFrame, sens)
-         noTargetNotifyTime = 0
-      else
-         noTargetNotifyTime += 1
-         if noTargetNotifyTime > 60 and tick() - lastNotify > 2 then  -- Notify every 2s if no target
-            Rayfield:Notify({Title = "Aimbot", Content = "No enemies in FOV! (Increase FOV)", Duration = 2})
-            lastNotify = tick()
-         end
-      end
-   end
+RunService.RenderStepped:Connect(function(delta)
+    -- Update FOV circle position (follows mouse)
+    fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + game:GetService("GuiService"):GetGuiInset().Y)
+    fovCircle.Radius = FOV
+    
+    if not Enabled or not Aiming then return end
+    
+    local targetPart = getClosestEnemy()
+    if not targetPart then return end
+    
+    -- Very basic prediction (you can improve this a lot)
+    local root = targetPart.Parent:FindFirstChild("HumanoidRootPart")
+    local predictedPos = targetPart.Position
+    if root and Prediction > 0 then
+        predictedPos = predictedPos + (root.Velocity * Prediction)
+    end
+    
+    local screenPos, visible = Camera:WorldToViewportPoint(predictedPos)
+    if not visible then return end
+    
+    local current = Vector2.new(Mouse.X, Mouse.Y)
+    local targetScreen = Vector2.new(screenPos.X, screenPos.Y)
+    
+    local delta = (targetScreen - current) * Smoothness
+    
+    mousemoverel(delta.X, delta.Y)
 end)
 
-Rayfield:LoadConfiguration()
-Rayfield:Notify({Title = "VxHub Loaded", Content = "Hold RMB → Lock enemy heads (ignores teammates!)", Duration = 5, Image = 4483362458})
+-- ────────────────────────────────────────
+--   Very basic 2D Box ESP
+-- ────────────────────────────────────────
+
+local function createESP(player)
+    if ESP_Objects[player] then return end
+    
+    local box = Drawing.new("Square")
+    box.Thickness   = ESP_Thickness
+    box.Filled      = false
+    box.Transparency = 1
+    box.Color       = ESP_Color
+    box.Visible     = false
+    
+    local nameText = Drawing.new("Text")
+    nameText.Size      = 13
+    nameText.Center    = true
+    nameText.Outline   = true
+    nameText.Color     = ESP_Color
+    nameText.Visible   = false
+    
+    ESP_Objects[player] = {Box = box, Name = nameText}
+end
+
+local function updateESP()
+    if not ESP_Enabled then
+        for _, obj in pairs(ESP_Objects) do
+            obj.Box.Visible = false
+            obj.Name.Visible = false
+        end
+        return
+    end
+    
+    for player, drawings in pairs(ESP_Objects) do
+        if not player or not player.Parent then
+            drawings.Box:Remove()
+            drawings.Name:Remove()
+            ESP_Objects[player] = nil
+            continue
+        end
+        
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Head") then
+            drawings.Box.Visible = false
+            drawings.Name.Visible = false
+            continue
+        end
+        
+        local root = char.HumanoidRootPart
+        local head = char.Head
+        
+        local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+        if not onScreen then
+            drawings.Box.Visible = false
+            drawings.Name.Visible = false
+            continue
+        end
+        
+        local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.8, 0))
+        local legPos  = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
+        
+        local height = math.abs(headPos.Y - legPos.Y)
+        local width  = height * 0.55
+        
+        drawings.Box.Size     = Vector2.new(width, height)
+        drawings.Box.Position = Vector2.new(rootPos.X - width/2, rootPos.Y - height/2)
+        drawings.Box.Visible  = true
+        
+        drawings.Name.Text    = string.format("%s [%.0f]", player.Name, (LocalPlayer.Character.HumanoidRootPart.Position - root.Position).Magnitude)
+        drawings.Name.Position = Vector2.new(rootPos.X, rootPos.Y - height/2 - 16)
+        drawings.Name.Visible = true
+    end
+end
+
+-- Initialize ESP for existing & new players
+for _, p in ipairs(Players:GetPlayers()) do
+    createESP(p)
+end
+Players.PlayerAdded:Connect(createESP)
+
+RunService.RenderStepped:Connect(updateESP)
+
+-- ────────────────────────────────────────
+--   UI Controls
+-- ────────────────────────────────────────
+
+Tab:CreateToggle({
+    Name = "Aimlock Enabled (hold RMB)",
+    CurrentValue = false,
+    Callback = function(v)
+        Enabled = v
+        if not v then Aiming = false end
+    end
+})
+
+Tab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = true,
+    Callback = function(v) TeamCheck = v end
+})
+
+Tab:CreateToggle({
+    Name = "Wall Check",
+    CurrentValue = true,
+    Callback = function(v) WallCheck = v end
+})
+
+Tab:CreateSlider({
+    Name = "Smoothness",
+    Range = {0.05, 0.40},
+    Increment = 0.01,
+    CurrentValue = 0.14,
+    Callback = function(v) Smoothness = v end
+})
+
+Tab:CreateSlider({
+    Name = "Field of View",
+    Range = {60, 400},
+    Increment = 10,
+    CurrentValue = 180,
+    Callback = function(v) FOV = v end
+})
+
+Tab:CreateToggle({
+    Name = "Show FOV Circle",
+    CurrentValue = true,
+    Callback = function(v) fovCircle.Visible = v end
+})
+
+Tab:CreateToggle({
+    Name = "Box ESP",
+    CurrentValue = false,
+    Callback = function(v) ESP_Enabled = v end
+})
+
+Tab:CreateLabel("Educational / testing use only.")
+Tab:CreateLabel("Modern anticheats detect mouse movement patterns very quickly.")
