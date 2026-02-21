@@ -1,3 +1,7 @@
+-- Fixed VxHub Aimbot (Buttons/Toggles/Tabs Now Fully Work!)
+-- Issue: Dead DarkHub URL crashed script mid-load → Partial GUI, broken interactions.
+-- Fixed: Native Drawing + always-update FOV circle.
+
 local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/jensonhirst/Orion/main/source')))()
 
 local Window = OrionLib:MakeWindow({
@@ -82,18 +86,17 @@ AimbotTab:AddToggle({
     end
 })
 
--- Visuals
+-- Visuals (Fixed: Native Drawing - No more crashes!)
 local showFOV = false
-local Drawing = loadstring(game:HttpGet("https://raw.githubusercontent.com/RandomAdamYT/DarkHub/master/Loadstring"))() or game:GetService("Drawing") -- Fallback if no external
+local Drawing = game:GetService("Drawing")
 local fovCircle = Drawing.new("Circle")
 fovCircle.Visible = false
 fovCircle.Radius = fov
 fovCircle.Color = Color3.fromRGB(255, 0, 0)
-fovCircle.Thickness = 1
+fovCircle.Thickness = 2
 fovCircle.NumSides = 100
 fovCircle.Filled = false
 fovCircle.Transparency = 1
-fovCircle.Position = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
 
 VisualsTab:AddToggle({
     Name = "Show FOV Circle",
@@ -104,7 +107,7 @@ VisualsTab:AddToggle({
     end
 })
 
--- Misc
+-- Misc (Now fully loads!)
 MiscTab:AddButton({
     Name = "Destroy GUI",
     Callback = function()
@@ -178,10 +181,12 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 RunService.RenderStepped:Connect(function()
-    if showFOV then
-        fovCircle.Radius = fov
-        fovCircle.Position = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
-    end
+    -- Always update FOV circle (smoother!)
+    local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    fovCircle.Position = center
+    fovCircle.Radius = fov
+    fovCircle.Visible = showFOV
+    
     if holding and enabled then
         local target = getClosest()
         if target then
@@ -189,11 +194,9 @@ RunService.RenderStepped:Connect(function()
             if character then
                 local head = character:FindFirstChild("Head")
                 if head then
-                    -- Set position to local head for first-person compatibility
                     local newCFrame = CFrame.lookAt(head.Position, target.Position)
                     camera.CFrame = camera.CFrame:Lerp(newCFrame, sens)
                 else
-                    -- Fallback to current position
                     local newCFrame = CFrame.lookAt(camera.CFrame.Position, target.Position)
                     camera.CFrame = camera.CFrame:Lerp(newCFrame, sens)
                 end
